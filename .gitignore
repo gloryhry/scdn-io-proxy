@@ -1,0 +1,39 @@
+# Go 编译产物/测试产物
+/bin/
+/dist/
+/build/
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+*.test
+*.out
+
+# 日志
+*.log
+
+# SQLite 运行时文件（包含 WAL/SHM）
+*.sqlite
+*.sqlite-*
+*.db
+*.db-*
+
+# 本地运行数据/产物（按需补充）
+/proxy-pool.sqlite*
+/scdn-io-proxy
+/scdn-io-proxy.exe
+
+# 本地工作流/笔记
+/.spec-workflow/
+/todo.md
+/todo.me
+
+# IDE/编辑器
+/.vscode/
+/.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db

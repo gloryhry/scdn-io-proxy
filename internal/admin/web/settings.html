@@ -1,0 +1,201 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>SCDN 代理池中转 - 参数设置</title>
+    <link rel="stylesheet" href="/app.css" />
+  </head>
+  <body>
+    <div class="wrap">
+      <div class="top">
+        <div class="title">
+          <h1>参数设置</h1>
+          <div class="sub">保存后会写入SQLite；大多数参数会实时生效（监听端口类参数需重启）。</div>
+        </div>
+        <div class="actions">
+          <a class="btn" href="/">返回监控</a>
+          <button class="btn primary" id="btnSave">保存</button>
+        </div>
+      </div>
+
+      <div class="card">
+        <h2>运行参数</h2>
+        <div class="form" id="form">
+          <div class="field">
+            <label>scdn_api_key (留空=不修改)</label>
+            <input id="scdn_api_key" type="password" placeholder="***" />
+            <div class="help">用于调用 SCDN get_proxy 接口；留空不会修改数据库中已保存的 key。</div>
+          </div>
+          <div class="field">
+            <label>fetch_protocol</label>
+            <select id="fetch_protocol">
+              <option value="http">http</option>
+              <option value="https">https</option>
+              <option value="socks5">socks5</option>
+            </select>
+            <div class="help">指定要拉取的代理协议类型；测试 HTTPS 站点时建议优先选择 https。</div>
+          </div>
+          <div class="field">
+            <label>country_code (US 或 all)</label>
+            <input id="country_code" type="text" />
+            <div class="help">ISO 3166-1 两位国家码，例如 US/CN；all 表示不限制区域。</div>
+          </div>
+          <div class="field">
+            <label>fetch_count (1-20)</label>
+            <input id="fetch_count" type="number" min="1" max="20" />
+            <div class="help">每次拉取的代理数量；接口最大 20。</div>
+          </div>
+          <div class="field">
+            <label>fetch_interval_seconds</label>
+            <input id="fetch_interval_seconds" type="number" min="1" />
+            <div class="help">后台自动拉取间隔（秒）。</div>
+          </div>
+          <div class="field">
+            <label>exit_hold_seconds</label>
+            <input id="exit_hold_seconds" type="number" min="1" />
+            <div class="help">出口代理保持时长（秒）；到期后新连接切换到下一个代理，已建立连接不受影响。</div>
+          </div>
+          <div class="field">
+            <label>test_url</label>
+            <input id="test_url" type="text" />
+            <div class="help">用于验证代理可用性的目标 URL；建议使用稳定的小页面。</div>
+          </div>
+          <div class="field">
+            <label>test_timeout_seconds</label>
+            <input id="test_timeout_seconds" type="number" min="1" />
+            <div class="help">单个代理的测试超时（秒）。</div>
+          </div>
+          <div class="field">
+            <label>retest_interval_seconds</label>
+            <input id="retest_interval_seconds" type="number" min="1" />
+            <div class="help">池内代理复测间隔（秒）；复测失败会从代理池移除。</div>
+          </div>
+          <div class="field">
+            <label>test_concurrency</label>
+            <input id="test_concurrency" type="number" min="1" max="200" />
+            <div class="help">并发测试数量；过大可能导致本机连接数/CPU 压力升高。</div>
+          </div>
+
+          <div class="field">
+            <label>proxy_auth_user</label>
+            <input id="proxy_auth_user" type="text" />
+            <div class="help">下游使用本服务代理（HTTP/SOCKS5）时的认证用户名。</div>
+          </div>
+          <div class="field">
+            <label>proxy_auth_pass (留空=不修改)</label>
+            <input id="proxy_auth_pass" type="password" placeholder="***" />
+            <div class="help">下游使用本服务代理（HTTP/SOCKS5）时的认证密码；留空不修改。</div>
+          </div>
+          <div class="field">
+            <label>admin_auth_user (留空=跟随 proxy_auth_user)</label>
+            <input id="admin_auth_user" type="text" />
+            <div class="help">管理后台 Basic 认证用户名；留空表示跟随 proxy_auth_user。</div>
+          </div>
+          <div class="field">
+            <label>admin_auth_pass (留空=不修改；admin_auth_user留空时不生效)</label>
+            <input id="admin_auth_pass" type="password" placeholder="***" />
+            <div class="help">管理后台 Basic 认证密码；留空不修改。当 admin_auth_user 为空时不会使用该密码。</div>
+          </div>
+        </div>
+        <div class="note">
+          注意：为了避免误操作清空密钥/密码，密码类字段留空会被当作“不修改”。如需切换管理后台账号，建议同时设置 admin_auth_user 与 admin_auth_pass。
+        </div>
+      </div>
+    </div>
+
+    <div class="toast" id="toast"></div>
+
+    <script>
+      const $ = (id) => document.getElementById(id);
+      const toast = (msg) => {
+        const el = $("toast");
+        el.textContent = msg;
+        el.classList.add("show");
+        setTimeout(() => el.classList.remove("show"), 2600);
+      };
+      async function api(path, opts){
+        const res = await fetch(path, Object.assign({headers:{ "Content-Type":"application/json" }}, opts || {}));
+        if(!res.ok){
+          const t = await res.text().catch(()=> "");
+          throw new Error(`${res.status} ${res.statusText} ${t}`.trim());
+        }
+        const ct = res.headers.get("content-type") || "";
+        if(ct.includes("application/json")) return await res.json();
+        return await res.text();
+      }
+
+      function setVal(id, v){
+        const el = $(id);
+        if(!el) return;
+        if(el.tagName === "SELECT"){
+          el.value = v || el.value;
+          return;
+        }
+        el.value = v == null ? "" : String(v);
+      }
+
+      async function load(){
+        const s = await api("/api/settings");
+        setVal("fetch_protocol", s.fetch_protocol);
+        setVal("country_code", s.country_code);
+        setVal("fetch_count", s.fetch_count);
+        setVal("fetch_interval_seconds", s.fetch_interval_seconds);
+        setVal("exit_hold_seconds", s.exit_hold_seconds);
+        setVal("test_url", s.test_url);
+        setVal("test_timeout_seconds", s.test_timeout_seconds);
+        setVal("retest_interval_seconds", s.retest_interval_seconds);
+        setVal("test_concurrency", s.test_concurrency);
+        setVal("proxy_auth_user", s.proxy_auth_user);
+        setVal("admin_auth_user", s.admin_auth_user || "");
+      }
+
+      function intOrNull(v){
+        const n = parseInt(v, 10);
+        return Number.isFinite(n) ? n : null;
+      }
+
+      async function save(){
+        const patch = {
+          scdn_api_key: $("scdn_api_key").value,
+          fetch_protocol: $("fetch_protocol").value,
+          country_code: $("country_code").value,
+          fetch_count: intOrNull($("fetch_count").value),
+          fetch_interval_seconds: intOrNull($("fetch_interval_seconds").value),
+          exit_hold_seconds: intOrNull($("exit_hold_seconds").value),
+          test_url: $("test_url").value,
+          test_timeout_seconds: intOrNull($("test_timeout_seconds").value),
+          retest_interval_seconds: intOrNull($("retest_interval_seconds").value),
+          test_concurrency: intOrNull($("test_concurrency").value),
+          proxy_auth_user: $("proxy_auth_user").value,
+          proxy_auth_pass: $("proxy_auth_pass").value,
+          admin_auth_user: $("admin_auth_user").value,
+          admin_auth_pass: $("admin_auth_pass").value,
+        };
+        // 让后端用 “omitempty” 语义：数字为空时不传。
+        for(const k of Object.keys(patch)){
+          if(patch[k] === null) delete patch[k];
+        }
+        await api("/api/settings", {method:"POST", body: JSON.stringify(patch)});
+        $("scdn_api_key").value = "";
+        $("proxy_auth_pass").value = "";
+        $("admin_auth_pass").value = "";
+      }
+
+      $("btnSave").addEventListener("click", async () => {
+        try{
+          $("btnSave").disabled = true;
+          await save();
+          toast("已保存");
+          await load();
+        }catch(e){
+          toast(String(e.message || e));
+        }finally{
+          $("btnSave").disabled = false;
+        }
+      });
+
+      load().catch(e => toast(String(e.message || e)));
+    </script>
+  </body>
+</html>

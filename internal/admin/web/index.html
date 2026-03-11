@@ -1,0 +1,370 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>SCDN 代理池中转</title>
+    <link rel="stylesheet" href="/app.css" />
+  </head>
+  <body>
+    <div class="wrap">
+      <div class="top">
+        <div class="title">
+          <h1>SCDN 代理池中转</h1>
+          <div class="sub" id="sub">loading…</div>
+        </div>
+        <div class="actions">
+          <button class="btn warn" id="btnRotate">切换出口</button>
+          <button class="btn" id="btnRetest">复测代理</button>
+          <button class="btn primary" id="btnFetch">拉取代理</button>
+          <a class="btn" href="/settings">参数设置</a>
+        </div>
+      </div>
+
+      <div class="grid">
+        <div class="card">
+          <h2>当前出口</h2>
+          <div class="kv">
+            <div class="k">状态</div>
+            <div class="v"><span class="pill"><span id="dot" class="dot"></span><span id="exitStatus">-</span></span></div>
+            <div class="k">出口代理</div>
+            <div class="v" id="exitAddr">-</div>
+            <div class="k">剩余保持</div>
+            <div class="v" id="exitRemain">-</div>
+            <div class="k">切换时间</div>
+            <div class="v" id="exitSwitchAt">-</div>
+          </div>
+        </div>
+
+        <div class="card">
+          <h2>池概览</h2>
+          <div class="kv">
+            <div class="k">可用代理数</div>
+            <div class="v" id="poolSize">-</div>
+            <div class="k">拉取协议</div>
+            <div class="v" id="fetchProtocol">-</div>
+            <div class="k">区域</div>
+            <div class="v" id="countryCode">-</div>
+            <div class="k">测试URL</div>
+            <div class="v" id="testURL">-</div>
+          </div>
+          <div class="note">出口切换仅影响新连接；已建立连接会继续使用创建时的出口直到断开。</div>
+        </div>
+      </div>
+
+      <div style="height:14px"></div>
+
+      <div class="card">
+        <div style="display:flex; align-items:center; justify-content:space-between; gap:12px; flex-wrap:wrap">
+          <h2 style="margin:0">代理池列表</h2>
+          <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap">
+            <div class="pill"><span class="muted">自动刷新</span><span id="tick">-</span></div>
+            <div class="pill"><span class="muted">总数</span><span id="proxyTotal">-</span></div>
+            <select id="pageSize" style="width:110px">
+              <option value="10">10/页</option>
+              <option value="50" selected>50/页</option>
+              <option value="100">100/页</option>
+            </select>
+            <button class="btn" id="btnFirst">首页</button>
+            <button class="btn" id="btnPrev">上一页</button>
+            <input id="pageNo" type="number" min="1" step="1" value="1" style="width:90px" />
+            <span class="muted" id="pageInfo">/ -</span>
+            <button class="btn" id="btnGo">跳转</button>
+            <button class="btn" id="btnNext">下一页</button>
+            <button class="btn" id="btnLast">末页</button>
+            <button class="btn warn" id="btnDelete">删除所选</button>
+          </div>
+        </div>
+        <div style="height:10px"></div>
+        <table>
+          <thead>
+            <tr>
+              <th style="width:38px"><input type="checkbox" id="chkAll" /></th>
+              <th style="width:110px">协议</th>
+              <th style="width:90px">区域</th>
+              <th>ip:port</th>
+              <th style="width:160px">上次测试</th>
+              <th style="width:120px">延迟(ms)</th>
+            </tr>
+          </thead>
+          <tbody id="rows"></tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="toast" id="toast"></div>
+
+    <script>
+      const $ = (id) => document.getElementById(id);
+      const toast = (msg) => {
+        const el = $("toast");
+        el.textContent = msg;
+        el.classList.add("show");
+        setTimeout(() => el.classList.remove("show"), 2400);
+      };
+
+      function fmtTime(ts){
+        if(!ts) return "-";
+        const d = new Date(ts);
+        return d.toLocaleString();
+      }
+      function fmtDur(sec){
+        if(sec == null) return "-";
+        sec = Math.max(0, Math.floor(sec));
+        const m = Math.floor(sec/60), s = sec%60;
+        return `${m}m${String(s).padStart(2,"0")}s`;
+      }
+
+      async function api(path, opts){
+        const res = await fetch(path, Object.assign({headers:{ "Content-Type":"application/json" }}, opts || {}));
+        if(!res.ok){
+          const t = await res.text().catch(()=> "");
+          throw new Error(`${res.status} ${res.statusText} ${t}`.trim());
+        }
+        const ct = res.headers.get("content-type") || "";
+        if(ct.includes("application/json")) return await res.json();
+        return await res.text();
+      }
+
+      const state = {
+        page: 1,
+        pageSize: 50,
+        totalPages: 0,
+        currentPageIDs: [],
+        selected: new Set(),
+      };
+
+      function updateSelectionUI(){
+        const btn = $("btnDelete");
+        btn.disabled = state.selected.size === 0;
+        btn.textContent = state.selected.size === 0 ? "删除所选" : `删除所选(${state.selected.size})`;
+
+        const all = $("chkAll");
+        const ids = state.currentPageIDs;
+        if(ids.length === 0){
+          all.checked = false;
+          all.indeterminate = false;
+          return;
+        }
+        let hit = 0;
+        for(const id of ids){
+          if(state.selected.has(id)) hit++;
+        }
+        all.checked = hit === ids.length;
+        all.indeterminate = hit > 0 && hit < ids.length;
+      }
+
+      function updatePagerUI(){
+        const total = Number(state.totalPages || 0);
+        const page = Number(state.page || 1);
+        $("btnFirst").disabled = total === 0 || page <= 1;
+        $("btnPrev").disabled = total === 0 || page <= 1;
+        $("btnNext").disabled = total === 0 || page >= total;
+        $("btnLast").disabled = total === 0 || page >= total;
+      }
+
+      async function refresh(){
+        const [status, proxies, settings] = await Promise.all([
+          api("/api/status"),
+          api(`/api/proxies?page=${state.page}&page_size=${state.pageSize}`),
+          api("/api/settings"),
+        ]);
+
+        $("sub").textContent = `admin: ${location.host}`;
+        $("tick").textContent = new Date().toLocaleTimeString();
+
+        $("poolSize").textContent = String(status.pool_size);
+        $("fetchProtocol").textContent = settings.fetch_protocol || "-";
+        $("countryCode").textContent = settings.country_code || "-";
+        $("testURL").textContent = settings.test_url || "-";
+
+        const dot = $("dot");
+        dot.classList.remove("ok","bad");
+        if(status.current_exit){
+          dot.classList.add("ok");
+          $("exitStatus").textContent = "已就绪";
+          $("exitAddr").textContent = `${status.current_exit.protocol} ${status.current_exit.country_code} ${status.current_exit.addr}`;
+          $("exitRemain").textContent = fmtDur(status.exit_remaining_seconds);
+          $("exitSwitchAt").textContent = fmtTime(status.exit_expires_at_ms);
+        }else{
+          dot.classList.add("bad");
+          $("exitStatus").textContent = "无可用出口";
+          $("exitAddr").textContent = "-";
+          $("exitRemain").textContent = "-";
+          $("exitSwitchAt").textContent = "-";
+        }
+
+        const tbody = $("rows");
+        tbody.innerHTML = "";
+        const items = proxies.items || [];
+        state.currentPageIDs = items.map(x => x.id);
+
+        $("proxyTotal").textContent = String(proxies.total ?? status.pool_size ?? 0);
+        state.totalPages = Number(proxies.total_pages || 0);
+        $("pageInfo").textContent = `/ ${state.totalPages || "-"}`;
+        $("pageNo").max = state.totalPages > 0 ? String(state.totalPages) : "";
+        if(document.activeElement !== $("pageNo")){
+          $("pageNo").value = String(proxies.page ?? state.page);
+        }
+        state.page = Number(proxies.page || state.page);
+
+        for(const p of items){
+          const tr = document.createElement("tr");
+          const checked = state.selected.has(p.id) ? "checked" : "";
+          tr.innerHTML = `
+            <td><input type="checkbox" data-id="${p.id}" ${checked} /></td>
+            <td>${p.protocol}</td>
+            <td>${p.country_code}</td>
+            <td>${p.addr}</td>
+            <td>${fmtTime(p.last_test_at_ms)}</td>
+            <td>${p.last_test_latency_ms}</td>
+          `;
+          tbody.appendChild(tr);
+        }
+        updateSelectionUI();
+        updatePagerUI();
+      }
+
+      async function runAction(path){
+         try{
+           const btns = [$("btnFetch"), $("btnRetest"), $("btnRotate")];
+           btns.forEach(b => b.disabled = true);
+           const res = await api(path, {method:"POST", body:"{}"});
+           if(res && typeof res === "object"){
+             if(res.inserted != null){
+              let msg = `拉取完成 returned=${res.returned} candidates=${res.candidates} tested=${res.tested} inserted=${res.inserted} failed=${res.failed} cost=${res.duration_ms}ms`;
+              if(Array.isArray(res.sample_errors) && res.sample_errors.length > 0){
+                msg += `; sample=${res.sample_errors[0]}`;
+              }
+              toast(msg);
+             }else if(res.updated != null){
+              let msg = `复测完成 total=${res.total} tested=${res.tested} updated=${res.updated} removed=${res.removed} errors=${res.errors} cost=${res.duration_ms}ms`;
+              if(Array.isArray(res.sample_errors) && res.sample_errors.length > 0){
+                msg += `; sample=${res.sample_errors[0]}`;
+              }
+              toast(msg);
+             }else if(res.has_proxy != null){
+              toast(res.has_proxy ? `已切换到 ${res.proxy}` : "当前无可用出口");
+             }else{
+              toast("已触发");
+             }
+          }else{
+            toast("已触发");
+          }
+          await refresh();
+        }catch(e){
+          toast(String(e.message || e));
+        }finally{
+          const btns = [$("btnFetch"), $("btnRetest"), $("btnRotate")];
+          btns.forEach(b => b.disabled = false);
+        }
+      }
+
+      $("btnFetch").addEventListener("click", () => runAction("/api/actions/fetch"));
+      $("btnRetest").addEventListener("click", () => runAction("/api/actions/retest"));
+      $("btnRotate").addEventListener("click", () => runAction("/api/actions/rotate"));
+
+      $("pageSize").addEventListener("change", async (e) => {
+        const v = parseInt(e.target.value, 10);
+        if(v === 10 || v === 50 || v === 100){
+          state.pageSize = v;
+          state.page = 1;
+          await refresh().catch(e => toast(String(e.message || e)));
+        }
+      });
+
+      $("btnFirst").addEventListener("click", async () => {
+        state.page = 1;
+        await refresh().catch(e => toast(String(e.message || e)));
+      });
+      $("btnPrev").addEventListener("click", async () => {
+        if(state.page > 1){
+          state.page -= 1;
+          await refresh().catch(e => toast(String(e.message || e)));
+        }
+      });
+
+      $("btnGo").addEventListener("click", async () => {
+        const v = parseInt($("pageNo").value, 10);
+        if(Number.isFinite(v) && v > 0){
+          state.page = v;
+          await refresh().catch(e => toast(String(e.message || e)));
+        }
+      });
+      $("pageNo").addEventListener("keydown", async (e) => {
+        if(e.key === "Enter"){
+          e.preventDefault();
+          $("btnGo").click();
+        }
+      });
+
+      $("btnNext").addEventListener("click", async () => {
+        const total = Number(state.totalPages || 0);
+        if(total > 0 && state.page >= total){
+          return;
+        }
+        state.page += 1;
+        await refresh().catch(e => toast(String(e.message || e)));
+      });
+      $("btnLast").addEventListener("click", async () => {
+        const total = Number(state.totalPages || 0);
+        if(total <= 0){
+          toast("暂无数据");
+          return;
+        }
+        state.page = total;
+        await refresh().catch(e => toast(String(e.message || e)));
+      });
+
+      $("chkAll").addEventListener("change", (e) => {
+        const ids = state.currentPageIDs || [];
+        if(e.target.checked){
+          for(const id of ids) state.selected.add(id);
+        }else{
+          for(const id of ids) state.selected.delete(id);
+        }
+        updateSelectionUI();
+        // 直接更新页面上的 checkbox 状态即可，避免额外刷新。
+        document.querySelectorAll("#rows input[type='checkbox'][data-id]").forEach((el) => {
+          el.checked = e.target.checked;
+        });
+      });
+
+      $("rows").addEventListener("change", (e) => {
+        const el = e.target;
+        if(!el || el.tagName !== "INPUT" || el.type !== "checkbox") return;
+        const id = parseInt(el.getAttribute("data-id"), 10);
+        if(!Number.isFinite(id)) return;
+        if(el.checked) state.selected.add(id);
+        else state.selected.delete(id);
+        updateSelectionUI();
+      });
+
+      $("btnDelete").addEventListener("click", async () => {
+        const ids = Array.from(state.selected);
+        if(ids.length === 0){
+          toast("未选择代理");
+          return;
+        }
+        if(!confirm(`确认删除选中的 ${ids.length} 条代理？此操作不可恢复。`)){
+          return;
+        }
+        const btn = $("btnDelete");
+        btn.disabled = true;
+        try{
+          const res = await api("/api/proxies/delete", {method:"POST", body: JSON.stringify({ids})});
+          toast(`已删除 ${res.deleted ?? 0} 条`);
+          state.selected.clear();
+          await refresh();
+        }catch(e){
+          toast(String(e.message || e));
+        }finally{
+          updateSelectionUI();
+        }
+      });
+
+      refresh().catch(e => toast(String(e.message || e)));
+      setInterval(() => refresh().catch(()=>{}), 2000);
+    </script>
+  </body>
+</html>
