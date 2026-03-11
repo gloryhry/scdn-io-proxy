@@ -18,17 +18,18 @@ RUN CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH \
 
 FROM alpine:3.21
 
-RUN apk add --no-cache ca-certificates tzdata && update-ca-certificates
+RUN apk add --no-cache ca-certificates tzdata su-exec && update-ca-certificates
 
 WORKDIR /app
 COPY --from=build /out/scdn-io-proxy /app/scdn-io-proxy
+COPY docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
 
 # 默认使用 1000:1000，方便与大多数 Linux 宿主机用户 UID/GID 对齐，避免挂载卷写入权限问题。
 RUN addgroup -S -g 1000 app && adduser -S -u 1000 -G app app \
   && mkdir -p /data \
-  && chown -R app:app /data
-USER app
+  && chown -R app:app /data \
+  && chmod +x /usr/local/bin/docker-entrypoint.sh
 
 EXPOSE 1080 8080
 
-ENTRYPOINT ["/app/scdn-io-proxy"]
+ENTRYPOINT ["/usr/local/bin/docker-entrypoint.sh"]

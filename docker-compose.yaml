@@ -13,6 +13,7 @@ services:
       # 注意：请确保宿主机 ./data 目录可写（以及其中的 proxy-pool.sqlite 可写）。
       # 若你之前用 root 跑过导致 ./data 归属为 root，可执行一次 chown 修复（会保留数据）：
       #   sudo chown -R 1000:1000 ./data
+      # 新版镜像启动时会尝试自动 chown /data，但在某些文件系统/挂载模式下仍可能失败，此时仍需手动修复。
       - "./data:/data"
     command:
       - "--listen"
