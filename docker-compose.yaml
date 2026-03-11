@@ -1,0 +1,32 @@
+services:
+  scdn-io-proxy:
+    # 你也可以改成本地构建：build: .
+    image: ${IMAGE:-ghcr.io/owner/repo:latest}
+    container_name: scdn-io-proxy
+    restart: unless-stopped
+    ports:
+      # 代理服务端口（HTTP Proxy + SOCKS5 同端口）
+      - "${PROXY_PORT:-1080}:1080"
+      # 管理后台端口（避免使用 6000，Chromium 会拦截）
+      - "${ADMIN_PORT:-8080}:8080"
+    volumes:
+      - "./data:/data"
+    command:
+      - "--listen"
+      - "0.0.0.0:1080"
+      - "--admin"
+      - "0.0.0.0:8080"
+      - "--db"
+      - "/data/proxy-pool.sqlite"
+      - "--scdn-api-key"
+      - "${SCDN_API_KEY:-}"
+      - "--fetch-protocol"
+      - "${FETCH_PROTOCOL:-http}"
+      - "--country"
+      - "${COUNTRY_CODE:-all}"
+      - "--test-url"
+      - "${TEST_URL:-https://www.example.com/}"
+      - "--proxy-user"
+      - "${PROXY_USER:-proxy}"
+      - "--proxy-pass"
+      - "${PROXY_PASS:-proxy}"

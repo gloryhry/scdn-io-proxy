@@ -1,0 +1,36 @@
+.git
+.gitignore
+
+# 本地工作流/笔记
+.spec-workflow
+todo.md
+todo.me
+
+# 数据库/运行数据
+*.sqlite
+*.sqlite-*
+*.db
+*.db-*
+proxy-pool.sqlite*
+data
+
+# 编译产物
+*.exe
+scdn-io-proxy
+scdn-io-proxy.exe
+bin
+dist
+build
+
+# Go 测试/输出
+*.test
+*.out
+
+# IDE/系统文件
+.vscode
+.idea
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
