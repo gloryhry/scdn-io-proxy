@@ -10,6 +10,9 @@ services:
       # 管理后台端口（避免使用 6000，Chromium 会拦截）
       - "${ADMIN_PORT:-8080}:8080"
     volumes:
+      # 注意：请确保宿主机 ./data 目录可写（以及其中的 proxy-pool.sqlite 可写）。
+      # 若你之前用 root 跑过导致 ./data 归属为 root，可执行一次 chown 修复（会保留数据）：
+      #   sudo chown -R 1000:1000 ./data
       - "./data:/data"
     command:
       - "--listen"

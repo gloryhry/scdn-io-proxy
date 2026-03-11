@@ -5,6 +5,8 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -19,10 +21,13 @@ func Open(path string) (*Store, error) {
 	if path == "" {
 		return nil, fmt.Errorf("db path 不能为空")
 	}
+	if err := ensureDBDir(path); err != nil {
+		return nil, err
+	}
 
 	db, err := sql.Open("sqlite", path)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("打开 sqlite 失败（path=%q）: %w", path, err)
 	}
 	// SQLite 并发写入能力有限，单连接最稳妥。
 	db.SetMaxOpenConns(1)
@@ -32,9 +37,32 @@ func Open(path string) (*Store, error) {
 	s := &Store{db: db}
 	if err := s.migrate(context.Background()); err != nil {
 		_ = db.Close()
-		return nil, err
+		return nil, fmt.Errorf("初始化 sqlite 失败（path=%q）: %w", path, err)
 	}
 	return s, nil
+}
+
+func ensureDBDir(path string) error {
+	// 仅支持“文件路径”用法（flag 文案：SQLite数据库文件路径）。
+	// 如果未来要支持 SQLite URI/DSN，这里需要更严格的解析。
+	raw := path
+	if strings.HasPrefix(raw, "file:") {
+		raw = strings.TrimPrefix(raw, "file:")
+		raw = strings.TrimPrefix(raw, "//")
+	}
+	raw, _, _ = strings.Cut(raw, "?")
+	if raw == "" || raw == ":memory:" {
+		return nil
+	}
+
+	dir := filepath.Dir(raw)
+	if dir == "." || dir == "" || dir == "/" {
+		return nil
+	}
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return fmt.Errorf("创建数据库目录失败（dir=%q, path=%q）: %w", dir, path, err)
+	}
+	return nil
 }
 
 func (s *Store) Close() error {
@@ -45,8 +73,14 @@ func (s *Store) Close() error {
 }
 
 func (s *Store) migrate(ctx context.Context) error {
+	// 优先 WAL（并发读友好），但在部分宿主机挂载卷/网络文件系统上可能不支持 WAL/SHM。
+	// 此时回退到 DELETE，保证服务能启动。
+	if _, err := s.db.ExecContext(ctx, `PRAGMA journal_mode=WAL;`); err != nil {
+		if _, err2 := s.db.ExecContext(ctx, `PRAGMA journal_mode=DELETE;`); err2 != nil {
+			return err
+		}
+	}
 	stmts := []string{
-		`PRAGMA journal_mode=WAL;`,
 		`PRAGMA synchronous=NORMAL;`,
 		`PRAGMA foreign_keys=ON;`,
 		`PRAGMA busy_timeout=5000;`,

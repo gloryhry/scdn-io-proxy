@@ -23,7 +23,10 @@ RUN apk add --no-cache ca-certificates tzdata && update-ca-certificates
 WORKDIR /app
 COPY --from=build /out/scdn-io-proxy /app/scdn-io-proxy
 
-RUN addgroup -S app && adduser -S -G app app
+# 默认使用 1000:1000，方便与大多数 Linux 宿主机用户 UID/GID 对齐，避免挂载卷写入权限问题。
+RUN addgroup -S -g 1000 app && adduser -S -u 1000 -G app app \
+  && mkdir -p /data \
+  && chown -R app:app /data
 USER app
 
 EXPOSE 1080 8080
