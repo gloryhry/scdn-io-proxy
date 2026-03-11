@@ -1,7 +1,7 @@
 services:
   scdn-io-proxy:
     # 你也可以改成本地构建：build: .
-    image: ${IMAGE:-ghcr.io/owner/repo:latest}
+    image: ghcr.io/gloryhry/scdn-io-proxy:latest
     container_name: scdn-io-proxy
     restart: unless-stopped
     ports:
